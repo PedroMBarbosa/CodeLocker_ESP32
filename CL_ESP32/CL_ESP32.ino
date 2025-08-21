@@ -2,8 +2,9 @@
 #include <HTTPClient.h>
 #include <Keypad.h>
 
-// Protótipo da função
+// Protótipo das funções
 void enviarCodigoParaAPI(String codigo);
+void enviarStatusSala(int status);
 
 // === CONFIG WIFI ===
 char ssid[] = "WIFI-EDUC-NB";        
@@ -17,9 +18,11 @@ const int ledGreen = 4;
 const int pinRelay = 22;
 
 bool fechado = true;
+int indice = 0;
 
-// === ENDPOINT DA API ===
-const String apiUrl = "http://10.90.146.23:7010/api/Usuarios/VerificaQRCode/";
+// === ENDPOINTS DA API ===
+const String apiUrlVerificaQR = "http://10.90.146.23:7010/api/Usuarios/VerificaQRCode/";
+const String apiUrlStatusSala = "http://10.90.146.23:7010/api/Salas/EditarStatus/1/status/";
 
 // === CONFIG TECLADO ===
 const byte ROWS = 4;
@@ -54,7 +57,7 @@ void setup() {
   
   unsigned long startTime = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - startTime < 20000) {
-    delay(1500); // Pausa para evitar travar
+    delay(1500);
     Serial.print(".");
   }
 
@@ -97,22 +100,20 @@ void loop() {
       codigoDigitado += tecla;
     }
 
-    delay(500); // Pausa leve para evitar leituras repetidas
+    delay(500);
   }
   
-  delay(200); // Delay geral no loop para aliviar CPU
+  delay(200);
 }
 
 void enviarCodigoParaAPI(String codigo) {
-  static int indice = 0;
-  
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("\nErro: WiFi desconectado!");
     return;
   }
 
   HTTPClient http;
-  String url = apiUrl + codigo;
+  String url = apiUrlVerificaQR + codigo;
   
   url.trim();
   if (url.length() == 0 || !url.startsWith("http")) {
@@ -132,7 +133,7 @@ void enviarCodigoParaAPI(String codigo) {
 
   int httpResponseCode = http.POST("");
 
-  delay(10); // Dá tempo para a CPU entre requisições
+  delay(10);
 
   if (httpResponseCode > 0) {
     String response = http.getString();
@@ -143,6 +144,9 @@ void enviarCodigoParaAPI(String codigo) {
       fechado = false;
       indice += 1;
       Serial.print("Índice: "); Serial.println(indice);
+      
+      // Enviar status 2 (sala aberta) quando o QR code for válido
+      enviarStatusSala(2);
     }
   } else {
     Serial.println("\nErro detalhado:");
@@ -155,7 +159,45 @@ void enviarCodigoParaAPI(String codigo) {
     indice = 0;
     digitalWrite(ledGreen, LOW);
     Serial.println("Resetando sistema...");
-    delay(1000); // Pequena pausa antes de resetar estado
+    
+    // Enviar status 1 (sala fechada) quando o sistema for resetado
+    enviarStatusSala(1);
+    delay(1000);
+  }
+
+  http.end();
+}
+
+void enviarStatusSala(int status) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("\nErro: WiFi desconectado! Não foi possível enviar status da sala.");
+    return;
+  }
+
+  HTTPClient http;
+  String url = apiUrlStatusSala + String(status);
+  
+  Serial.println("Enviando status da sala: " + String(status));
+  Serial.println("URL: " + url);
+  
+  if (!http.begin(url)) {
+    Serial.println("Erro: Falha ao conectar com o servidor para atualizar status da sala");
+    return;
+  }
+
+  http.setTimeout(5000);
+  http.addHeader("Content-Type", "application/json");
+
+  int httpResponseCode = http.POST("");
+
+  if (httpResponseCode > 0) {
+    String response = http.getString();
+    Serial.println("Status sala - Código HTTP: " + String(httpResponseCode));
+    Serial.println("Status sala - Resposta: " + response);
+  } else {
+    Serial.println("Erro ao enviar status da sala:");
+    Serial.println("Código: " + String(httpResponseCode));
+    Serial.println("Mensagem: " + http.errorToString(httpResponseCode));
   }
 
   http.end();
